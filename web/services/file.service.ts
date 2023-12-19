@@ -1,10 +1,10 @@
 // services
-import { APIService } from "services/api.service";
-// helpers
-import { API_BASE_URL } from "helpers/common.helper";
-import axios from "axios";
+import APIService from "services/api.service";
 
-export interface UnSplashImage {
+import getConfig from "next/config";
+const { publicRuntimeConfig: { NEXT_PUBLIC_API_BASE_URL } } = getConfig();
+
+interface UnSplashImage {
   id: string;
   created_at: Date;
   updated_at: Date;
@@ -19,7 +19,7 @@ export interface UnSplashImage {
   [key: string]: any;
 }
 
-export interface UnSplashImageUrls {
+interface UnSplashImageUrls {
   raw: string;
   full: string;
   regular: string;
@@ -28,65 +28,21 @@ export interface UnSplashImageUrls {
   small_s3: string;
 }
 
-export class FileService extends APIService {
-  private cancelSource: any;
-
+class FileServices extends APIService {
   constructor() {
-    super(API_BASE_URL);
-    this.uploadFile = this.uploadFile.bind(this);
-    this.deleteImage = this.deleteImage.bind(this);
-    this.restoreImage = this.restoreImage.bind(this);
-    this.cancelUpload = this.cancelUpload.bind(this);
+    super(NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000");
   }
 
   async uploadFile(workspaceSlug: string, file: FormData): Promise<any> {
-    this.cancelSource = axios.CancelToken.source();
-    return this.post(`/api/workspaces/${workspaceSlug}/file-assets/`, file, {
-      headers: {
-        ...this.getHeaders(),
-        "Content-Type": "multipart/form-data",
-      },
-      cancelToken: this.cancelSource.token,
-    })
+    return this.mediaUpload(`/api/workspaces/${workspaceSlug}/file-assets/`, file)
       .then((response) => response?.data)
-      .catch((error) => {
-        if (axios.isCancel(error)) {
-          console.log(error.message);
-        } else {
-          console.log(error);
-          throw error?.response?.data;
-        }
-      });
-  }
-
-  cancelUpload() {
-    this.cancelSource.cancel("Upload cancelled");
-  }
-
-  getUploadFileFunction(workspaceSlug: string): (file: File) => Promise<string> {
-    return async (file: File) => {
-      const formData = new FormData();
-      formData.append("asset", file);
-      formData.append("attributes", JSON.stringify({}));
-
-      const data = await this.uploadFile(workspaceSlug, formData);
-      return data.asset;
-    };
-  }
-
-  async deleteImage(assetUrlWithWorkspaceId: string): Promise<any> {
-    return this.delete(`/api/workspaces/file-assets/${assetUrlWithWorkspaceId}/`)
-      .then((response) => response?.status)
       .catch((error) => {
         throw error?.response?.data;
       });
   }
 
-  async restoreImage(assetUrlWithWorkspaceId: string): Promise<any> {
-    return this.post(`/api/workspaces/file-assets/${assetUrlWithWorkspaceId}/restore/`, {
-      headers: this.getHeaders(),
-      "Content-Type": "application/json",
-    })
+  async deleteImage(assetUrlWithWorkspaceId: string): Promise<any> {
+    return this.delete(`/api/workspaces/file-assets/${assetUrlWithWorkspaceId}/`)
       .then((response) => response?.status)
       .catch((error) => {
         throw error?.response?.data;
@@ -103,14 +59,8 @@ export class FileService extends APIService {
         throw error?.response?.data;
       });
   }
-
   async uploadUserFile(file: FormData): Promise<any> {
-    return this.post(`/api/users/file-assets/`, file, {
-      headers: {
-        ...this.getHeaders(),
-        "Content-Type": "multipart/form-data",
-      },
-    })
+    return this.mediaUpload(`/api/users/file-assets/`, file)
       .then((response) => response?.data)
       .catch((error) => {
         throw error?.response?.data;
@@ -128,23 +78,23 @@ export class FileService extends APIService {
       });
   }
 
-  async getUnsplashImages(query?: string): Promise<UnSplashImage[]> {
-    return this.get(`/api/unsplash/`, {
+  async getUnsplashImages(page: number = 1, query?: string): Promise<UnSplashImage[]> {
+    const url = "/api/unsplash";
+
+    return this.request({
+      method: "get",
+      url,
       params: {
+        page,
+        per_page: 20,
         query,
       },
     })
-      .then((res) => res?.data?.results ?? res?.data)
-      .catch((err) => {
-        throw err?.response?.data;
-      });
-  }
-
-  async getProjectCoverImages(): Promise<string[]> {
-    return this.get(`/api/project-covers/`)
-      .then((res) => res?.data)
-      .catch((err) => {
-        throw err?.response?.data;
+      .then((response) => response?.data?.results ?? response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
       });
   }
 }
+
+export default new FileServices();

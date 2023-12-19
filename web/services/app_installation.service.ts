@@ -1,11 +1,13 @@
 // services
-import { APIService } from "services/api.service";
-// helpers
-import { API_BASE_URL } from "helpers/common.helper";
+import axios from "axios";
+import APIService from "services/api.service";
 
-export class AppInstallationService extends APIService {
+import getConfig from "next/config";
+const { publicRuntimeConfig: { NEXT_PUBLIC_API_BASE_URL } } = getConfig();
+
+class AppInstallationsService extends APIService {
   constructor() {
-    super(API_BASE_URL);
+    super(NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000");
   }
 
   async addInstallationApp(workspaceSlug: string, provider: string, data: any): Promise<any> {
@@ -60,4 +62,18 @@ export class AppInstallationService extends APIService {
         throw error?.response;
       });
   }
+
+  async getSlackAuthDetails(code: string): Promise<any> {
+    const response = await axios({
+      method: "post",
+      url: "/api/slack-redirect",
+      data: {
+        code,
+      },
+    });
+
+    return response.data;
+  }
 }
+
+export default new AppInstallationsService();

@@ -1,8 +1,12 @@
-import { APIService } from "services/api.service";
+// services
+import getConfig from "next/config";
+import APIService from "services/api.service";
+import trackEventServices from "services/track-event.service";
+
 // types
-import { IGptResponse } from "types";
-// helpers
-import { API_BASE_URL } from "helpers/common.helper";
+import { ICurrentUserResponse, IGptResponse } from "types";
+
+const { publicRuntimeConfig: { NEXT_PUBLIC_API_BASE_URL } } = getConfig();
 
 export class AIService extends APIService {
   constructor() {

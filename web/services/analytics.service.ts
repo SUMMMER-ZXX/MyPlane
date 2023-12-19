@@ -11,7 +11,10 @@ import {
 // helpers
 import { API_BASE_URL } from "helpers/common.helper";
 
-export class AnalyticsService extends APIService {
+import getConfig from "next/config";
+const { publicRuntimeConfig: { NEXT_PUBLIC_API_BASE_URL } } = getConfig();
+
+class AnalyticsServices extends APIService {
   constructor() {
     super(API_BASE_URL);
   }

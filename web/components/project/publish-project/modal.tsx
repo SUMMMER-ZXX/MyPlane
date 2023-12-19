@@ -1,24 +1,34 @@
 import React, { useEffect, useState } from "react";
+// next imports
 import { useRouter } from "next/router";
-import { observer } from "mobx-react-lite";
+// react-hook-form
 import { Controller, useForm } from "react-hook-form";
+// headless ui
 import { Dialog, Transition } from "@headlessui/react";
+// ui components
+import getConfig from "next/config";
+import {
+  ToggleSwitch,
+  PrimaryButton,
+  SecondaryButton,
+  Icon,
+  DangerButton,
+  Loader,
+} from "components/ui";
+import { CustomPopover } from "./popover";
+// mobx react lite
+import { observer } from "mobx-react-lite";
 // mobx store
 import { useMobxStore } from "lib/mobx/store-provider";
-// ui components
-import { Button, Loader, ToggleSwitch } from "@plane/ui";
-import { Check, CircleDot, Globe2 } from "lucide-react";
-import { CustomPopover } from "./popover";
-import { IProjectPublishSettings, TProjectPublishViews } from "store/project";
+import { RootStore } from "store/root";
+import { IProjectPublishSettings, TProjectPublishViews } from "store/project-publish";
 // hooks
 import useToast from "hooks/use-toast";
-// types
-import { IProject } from "types";
+import useProjectDetails from "hooks/use-project-details";
+import useUser from "hooks/use-user";
 
 type Props = {
-  isOpen: boolean;
-  project: IProject;
-  onClose: () => void;
+  // user: ICurrentUserResponse | undefined;
 };
 
 type FormData = {
@@ -50,21 +60,23 @@ const viewOptions: {
   // { key: "spreadsheet", label: "Spreadsheet" },
 ];
 
-export const PublishProjectModal: React.FC<Props> = observer((props) => {
-  const { isOpen, project, onClose } = props;
-
+export const PublishProjectModal: React.FC<Props> = observer(() => {
   const [isUnpublishing, setIsUnpublishing] = useState(false);
   const [isUpdateRequired, setIsUpdateRequired] = useState(false);
 
-  let plane_deploy_url = process.env.NEXT_PUBLIC_DEPLOY_URL;
+  const { publicRuntimeConfig: { NEXT_PUBLIC_DEPLOY_URL } } = getConfig();
 
-  if (typeof window !== "undefined" && !plane_deploy_url)
-    plane_deploy_url = window.location.protocol + "//" + window.location.host + "/spaces";
+  const plane_deploy_url = NEXT_PUBLIC_DEPLOY_URL ?? "http://localhost:4000";
 
-  const router = useRouter();
+  const router = useRouter()
   const { workspaceSlug } = router.query;
 
-  const { projectPublish: projectPublishStore } = useMobxStore();
+  const store: RootStore = useMobxStore();
+  const { projectPublish } = store;
+
+  const { user } = useUser();
+
+  const { mutateProjectDetails } = useProjectDetails();
 
   const { setToastAlert } = useToast();
 
@@ -75,12 +87,12 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
     handleSubmit,
     reset,
     watch,
-  } = useForm({
+  } = useForm<FormData>({
     defaultValues,
   });
 
   const handleClose = () => {
-    onClose();
+    projectPublish.handleProjectModal(null);
 
     setIsUpdateRequired(false);
     reset({ ...defaultValues });
@@ -89,13 +101,13 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
   // prefill form with the saved settings if the project is already published
   useEffect(() => {
     if (
-      projectPublishStore.projectPublishSettings &&
-      projectPublishStore.projectPublishSettings !== "not-initialized"
+      projectPublish.projectPublishSettings &&
+      projectPublish.projectPublishSettings !== "not-initialized"
     ) {
       let userBoards: TProjectPublishViews[] = [];
 
-      if (projectPublishStore.projectPublishSettings?.views) {
-        const savedViews = projectPublishStore.projectPublishSettings?.views;
+      if (projectPublish.projectPublishSettings?.views) {
+        const savedViews = projectPublish.projectPublishSettings?.views;
 
         if (!savedViews) return;
 
@@ -109,46 +121,65 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
       }
 
       const updatedData = {
-        id: projectPublishStore.projectPublishSettings?.id || null,
-        comments: projectPublishStore.projectPublishSettings?.comments || false,
-        reactions: projectPublishStore.projectPublishSettings?.reactions || false,
-        votes: projectPublishStore.projectPublishSettings?.votes || false,
-        inbox: projectPublishStore.projectPublishSettings?.inbox || null,
+        id: projectPublish.projectPublishSettings?.id || null,
+        comments: projectPublish.projectPublishSettings?.comments || false,
+        reactions: projectPublish.projectPublishSettings?.reactions || false,
+        votes: projectPublish.projectPublishSettings?.votes || false,
+        inbox: projectPublish.projectPublishSettings?.inbox || null,
         views: userBoards,
       };
 
       reset({ ...updatedData });
     }
-  }, [reset, projectPublishStore.projectPublishSettings, isOpen]);
+  }, [reset, projectPublish.projectPublishSettings]);
 
   // fetch publish settings
   useEffect(() => {
-    if (!workspaceSlug || !isOpen) return;
-
-    if (projectPublishStore.projectPublishSettings === "not-initialized") {
-      projectPublishStore.getProjectSettingsAsync(workspaceSlug.toString(), project.id);
-    }
-  }, [isOpen, workspaceSlug, project, projectPublishStore]);
-
-  const handlePublishProject = async (payload: IProjectPublishSettings) => {
     if (!workspaceSlug) return;
 
-    return projectPublishStore
-      .publishProject(workspaceSlug.toString(), project.id, payload)
+    if (
+      projectPublish.projectPublishModal &&
+      projectPublish.project_id !== null &&
+      projectPublish?.projectPublishSettings === "not-initialized"
+    ) {
+      projectPublish.getProjectSettingsAsync(
+        workspaceSlug.toString(),
+        projectPublish.project_id,
+        null
+      );
+    }
+  }, [workspaceSlug, projectPublish, projectPublish.projectPublishModal]);
+
+  const handlePublishProject = async (payload: IProjectPublishSettings) => {
+    if (!workspaceSlug || !user) return;
+
+    const projectId = projectPublish.project_id;
+
+    return projectPublish
+      .publishProject(workspaceSlug.toString(), projectId?.toString() ?? "", payload, user)
       .then((res) => {
+        mutateProjectDetails();
         handleClose();
-        // window.open(`${plane_deploy_url}/${workspaceSlug}/${project.id}`, "_blank");
+        if (projectId) window.open(`${plane_deploy_url}/${workspaceSlug}/${projectId}`, "_blank");
         return res;
       })
       .catch((err) => err);
   };
 
   const handleUpdatePublishSettings = async (payload: IProjectPublishSettings) => {
-    if (!workspaceSlug) return;
+    if (!workspaceSlug || !user) return;
 
-    await projectPublishStore
-      .updateProjectSettingsAsync(workspaceSlug.toString(), project.id, payload.id ?? "", payload)
+    await projectPublish
+      .updateProjectSettingsAsync(
+        workspaceSlug.toString(),
+        projectPublish.project_id?.toString() ?? "",
+        payload.id ?? "",
+        payload,
+        user
+      )
       .then((res) => {
+        mutateProjectDetails();
+
         setToastAlert({
           type: "success",
           title: "Success!",
@@ -169,19 +200,20 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
 
     setIsUnpublishing(true);
 
-    await projectPublishStore
-      .unPublishProject(workspaceSlug.toString(), project.id, publishId)
+    projectPublish
+      .unPublishProject(
+        workspaceSlug.toString(),
+        projectPublish.project_id as string,
+        publishId,
+        null
+      )
       .then((res) => {
+        mutateProjectDetails();
+
         handleClose();
         return res;
       })
-      .catch(() =>
-        setToastAlert({
-          type: "error",
-          title: "Error!",
-          message: "Something went wrong while unpublishing the project.",
-        })
-      )
+      .catch((err) => err)
       .finally(() => setIsUnpublishing(false));
   };
 
@@ -198,7 +230,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
 
     return (
       <div
-        className="flex h-[30px] min-w-[30px] cursor-pointer items-center justify-center rounded border border-custom-border-100 bg-custom-background-100 px-2 text-xs hover:bg-custom-background-90"
+        className="border border-custom-border-100 bg-custom-background-100 text-xs px-2 min-w-[30px] h-[30px] rounded flex justify-center items-center hover:bg-custom-background-90 cursor-pointer"
         onClick={() => copyText()}
       >
         {status ? "Copied" : "Copy Link"}
@@ -230,16 +262,19 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
       },
     };
 
-    if (project.is_deployed) await handleUpdatePublishSettings({ id: watch("id") ?? "", ...payload });
+    if (watch("id")) await handleUpdatePublishSettings({ id: watch("id") ?? "", ...payload });
     else await handlePublishProject(payload);
   };
 
   // check if an update is required or not
   const checkIfUpdateIsRequired = () => {
-    if (!projectPublishStore.projectPublishSettings || projectPublishStore.projectPublishSettings === "not-initialized")
+    if (
+      !projectPublish.projectPublishSettings ||
+      projectPublish.projectPublishSettings === "not-initialized"
+    )
       return;
 
-    const currentSettings = projectPublishStore.projectPublishSettings as IProjectPublishSettings;
+    const currentSettings = projectPublish.projectPublishSettings as IProjectPublishSettings;
     const newSettings = getValues();
 
     if (
@@ -253,7 +288,8 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
 
     let viewCheckFlag = 0;
     viewOptions.forEach((option) => {
-      if (currentSettings.views[option.key] !== newSettings.views.includes(option.key)) viewCheckFlag++;
+      if (currentSettings.views[option.key] !== newSettings.views.includes(option.key))
+        viewCheckFlag++;
     });
 
     if (viewCheckFlag !== 0) {
@@ -265,7 +301,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
   };
 
   return (
-    <Transition.Root show={isOpen} as={React.Fragment}>
+    <Transition.Root show={projectPublish.projectPublishModal} as={React.Fragment}>
       <Dialog as="div" className="relative z-20" onClose={handleClose}>
         <Transition.Child
           as={React.Fragment}
@@ -276,7 +312,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-custom-backdrop transition-opacity" />
+          <div className="fixed inset-0 bg-custom-backdrop bg-opacity-50 transition-opacity" />
         </Transition.Child>
 
         <div className="fixed inset-0 z-20 overflow-y-auto">
@@ -290,25 +326,25 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
               leaveFrom="opacity-100 translate-y-0 sm:scale-100"
               leaveTo="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
             >
-              <Dialog.Panel className="w-full transform rounded-lg bg-custom-background-100 text-left shadow-custom-shadow-md transition-all sm:w-3/5 lg:w-1/2 xl:w-2/5">
+              <Dialog.Panel className="transform rounded-lg bg-custom-background-100 border border-custom-border-100 text-left shadow-xl transition-all w-full sm:w-3/5 lg:w-1/2 xl:w-2/5 ">
                 <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
                   {/* heading */}
-                  <div className="flex items-center justify-between gap-2 px-6 pt-4">
-                    <h5 className="inline-block text-xl font-semibold">Publish</h5>
-                    {project.is_deployed && (
-                      <Button
-                        variant="danger"
+                  <div className="px-6 pt-4 flex items-center justify-between gap-2">
+                    <h5 className="font-semibold text-xl inline-block">Publish</h5>
+                    {projectPublish.projectPublishSettings !== "not-initialized" && (
+                      <DangerButton
                         onClick={() => handleUnpublishProject(watch("id") ?? "")}
+                        className="!px-2 !py-1.5"
                         loading={isUnpublishing}
                       >
                         {isUnpublishing ? "Unpublishing..." : "Unpublish"}
-                      </Button>
+                      </DangerButton>
                     )}
                   </div>
 
                   {/* content */}
-                  {projectPublishStore.fetchSettingsLoader ? (
-                    <Loader className="space-y-4 px-6">
+                  {projectPublish.fetchSettingsLoader ? (
+                    <Loader className="px-6 space-y-4">
                       <Loader.Item height="30px" />
                       <Loader.Item height="30px" />
                       <Loader.Item height="30px" />
@@ -316,27 +352,29 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                     </Loader>
                   ) : (
                     <div className="px-6">
-                      {project.is_deployed && (
+                      {watch("id") && (
                         <>
-                          <div className="relative flex items-center gap-2 rounded-md border border-custom-border-100 bg-custom-background-80 px-3 py-2">
-                            <div className="flex-grow truncate text-sm">
-                              {`${plane_deploy_url}/${workspaceSlug}/${project.id}`}
+                          <div className="border border-custom-border-100 bg-custom-background-80 rounded-md px-3 py-2 relative flex gap-2 items-center">
+                            <div className="truncate flex-grow text-sm">
+                              {`${plane_deploy_url}/${workspaceSlug}/${projectPublish.project_id}`}
                             </div>
-                            <div className="relative flex flex-shrink-0 items-center gap-1">
-                              <CopyLinkToClipboard copy_link={`${plane_deploy_url}/${workspaceSlug}/${project.id}`} />
+                            <div className="flex-shrink-0 relative flex items-center gap-1">
+                              <CopyLinkToClipboard
+                                copy_link={`${plane_deploy_url}/${workspaceSlug}/${projectPublish.project_id}`}
+                              />
                             </div>
                           </div>
-                          <div className="mt-3 flex items-center gap-1 text-custom-primary-100">
-                            <div className="flex h-5 w-5 items-center overflow-hidden">
-                              <CircleDot className="h-5 w-5" />
+                          <div className="flex items-center gap-1 text-custom-primary-100 mt-3">
+                            <div className="w-5 h-5 overflow-hidden flex items-center">
+                              <Icon iconName="radio_button_checked" className="!text-lg" />
                             </div>
                             <div className="text-sm">This project is live on web</div>
                           </div>
                         </>
                       )}
 
-                      <div className="mt-6 space-y-4">
-                        <div className="relative flex items-center justify-between gap-2">
+                      <div className="space-y-4 mt-6">
+                        <div className="relative flex justify-between items-center gap-2">
                           <div className="text-sm">Views</div>
                           <Controller
                             control={control}
@@ -357,7 +395,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                                   {viewOptions.map((option) => (
                                     <div
                                       key={option.key}
-                                      className={`relative m-1 flex cursor-pointer items-center justify-between gap-2 rounded-sm p-1 px-2 text-custom-text-200 ${
+                                      className={`relative flex items-center gap-2 justify-between p-1 m-1 px-2 cursor-pointer rounded-sm text-custom-text-200 ${
                                         value.includes(option.key)
                                           ? "bg-custom-background-80 text-custom-text-100"
                                           : "hover:bg-custom-background-80 hover:text-custom-text-100"
@@ -377,9 +415,11 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                                       }}
                                     >
                                       <div className="text-sm">{option.label}</div>
-                                      <div className={`relative flex h-4 w-4 items-center justify-center`}>
+                                      <div
+                                        className={`w-[18px] h-[18px] relative flex justify-center items-center`}
+                                      >
                                         {value.length > 0 && value.includes(option.key) && (
-                                          <Check className="h-5 w-5" />
+                                          <Icon iconName="done" className="!text-lg" />
                                         )}
                                       </div>
                                     </div>
@@ -389,7 +429,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                             )}
                           />
                         </div>
-                        <div className="relative flex items-center justify-between gap-2">
+                        <div className="relative flex justify-between items-center gap-2">
                           <div className="text-sm">Allow comments</div>
                           <Controller
                             control={control}
@@ -406,7 +446,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                             )}
                           />
                         </div>
-                        <div className="relative flex items-center justify-between gap-2">
+                        <div className="relative flex justify-between items-center gap-2">
                           <div className="text-sm">Allow reactions</div>
                           <Controller
                             control={control}
@@ -423,7 +463,7 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                             )}
                           />
                         </div>
-                        <div className="relative flex items-center justify-between gap-2">
+                        <div className="relative flex justify-between items-center gap-2">
                           <div className="text-sm">Allow voting</div>
                           <Controller
                             control={control}
@@ -441,7 +481,6 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                           />
                         </div>
 
-                        {/* toggle inbox */}
                         {/* <div className="relative flex justify-between items-center gap-2">
                       <div className="text-sm">Allow issue proposals</div>
                       <Controller
@@ -457,28 +496,26 @@ export const PublishProjectModal: React.FC<Props> = observer((props) => {
                   )}
 
                   {/* modal handlers */}
-                  <div className="relative flex items-center justify-between border-t border-custom-border-200 px-6 py-5">
-                    <div className="flex items-center gap-1 text-sm text-custom-text-400">
-                      <Globe2 className="h-4 w-4" />
+                  <div className="border-t border-custom-border-200 px-6 py-5 relative flex justify-between items-center">
+                    <div className="flex items-center gap-1 text-custom-text-400 text-sm">
+                      <Icon iconName="public" className="!text-base" />
                       <div className="text-sm">Anyone with the link can access</div>
                     </div>
-                    {!projectPublishStore.fetchSettingsLoader && (
+                    {!projectPublish.fetchSettingsLoader && (
                       <div className="relative flex items-center gap-2">
-                        <Button variant="neutral-primary" size="sm" onClick={handleClose}>
-                          Cancel
-                        </Button>
-                        {project.is_deployed ? (
+                        <SecondaryButton onClick={handleClose}>Cancel</SecondaryButton>
+                        {watch("id") ? (
                           <>
                             {isUpdateRequired && (
-                              <Button variant="primary" size="sm" type="submit" loading={isSubmitting}>
+                              <PrimaryButton type="submit" loading={isSubmitting}>
                                 {isSubmitting ? "Updating..." : "Update settings"}
-                              </Button>
+                              </PrimaryButton>
                             )}
                           </>
                         ) : (
-                          <Button variant="primary" size="sm" type="submit" loading={isSubmitting}>
+                          <PrimaryButton type="submit" loading={isSubmitting}>
                             {isSubmitting ? "Publishing..." : "Publish"}
-                          </Button>
+                          </PrimaryButton>
                         )}
                       </div>
                     )}

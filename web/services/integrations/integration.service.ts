@@ -1,12 +1,24 @@
-import { APIService } from "services/api.service";
-// types
-import { IAppIntegration, IImporterService, IWorkspaceIntegration, IExportServiceResponse } from "types";
-// helper
-import { API_BASE_URL } from "helpers/common.helper";
+import APIService from "services/api.service";
+import trackEventServices from "services/track-event.service";
 
-export class IntegrationService extends APIService {
+// types
+import {
+  IAppIntegration,
+  ICurrentUserResponse,
+  IImporterService,
+  IWorkspaceIntegration,
+  IExportServiceResponse,
+} from "types";
+
+import getConfig from "next/config";
+const { publicRuntimeConfig: { NEXT_PUBLIC_API_BASE_URL } } = getConfig();
+
+const trackEvent =
+  process.env.NEXT_PUBLIC_TRACK_EVENTS === "true" || process.env.NEXT_PUBLIC_TRACK_EVENTS === "1";
+
+class IntegrationService extends APIService {
   constructor() {
-    super(API_BASE_URL);
+    super(NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000");
   }
 
   async getAppIntegrationsList(): Promise<IAppIntegration[]> {
@@ -26,7 +38,9 @@ export class IntegrationService extends APIService {
   }
 
   async deleteWorkspaceIntegration(workspaceSlug: string, integrationId: string): Promise<any> {
-    return this.delete(`/api/workspaces/${workspaceSlug}/workspace-integrations/${integrationId}/provider/`)
+    return this.delete(
+      `/api/workspaces/${workspaceSlug}/workspace-integrations/${integrationId}/provider/`
+    )
       .then((res) => res?.data)
       .catch((error) => {
         throw error?.response?.data;
@@ -57,11 +71,23 @@ export class IntegrationService extends APIService {
       });
   }
 
-  async deleteImporterService(workspaceSlug: string, service: string, importerId: string): Promise<any> {
+  async deleteImporterService(
+    workspaceSlug: string,
+    service: string,
+    importerId: string,
+    user: ICurrentUserResponse | undefined
+  ): Promise<any> {
     return this.delete(`/api/workspaces/${workspaceSlug}/importers/${service}/${importerId}/`)
-      .then((response) => response?.data)
+      .then((response) => {
+        const eventName = service === "github" ? "GITHUB_IMPORTER_DELETE" : "JIRA_IMPORTER_DELETE";
+
+        if (trackEvent) trackEventServices.trackImporterEvent(response?.data, eventName, user);
+        return response?.data;
+      })
       .catch((error) => {
         throw error?.response?.data;
       });
   }
 }
+
+export default new IntegrationService();
